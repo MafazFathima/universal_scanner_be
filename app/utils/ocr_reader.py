@@ -66,12 +66,15 @@ class OcrReader:
                 DocumentPages=[{"Bytes": image_bytes}]
             )
             identity_documents = response.get("IdentityDocuments", []) or []
-            # Return only the IdentityDocumentFields array (flattened across documents)
-            fields = []
+            # Return only the IdentityDocumentFields array per document (no blocks)
+            cleaned = []
             for doc in identity_documents:
                 doc_fields = doc.get("IdentityDocumentFields", []) or []
-                fields.extend(doc_fields)
-            return fields
+                cleaned.append({
+                    "DocumentIndex": doc.get("DocumentIndex"),
+                    "IdentityDocumentFields": doc_fields,
+                })
+            return cleaned
         except (BotoCoreError, ClientError) as e:
             logger.exception("Textract AnalyzeID failed")
             return []
