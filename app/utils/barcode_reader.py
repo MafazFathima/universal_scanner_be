@@ -122,11 +122,18 @@ class BarcodeReader:
         if not ZXING_AVAILABLE or zxingcpp is None:
             logger.error("Primary barcode decoder not available - cannot decode barcodes")
             return []
+        allowed_types = {"PDF417", "QR_CODE"}
         def _read(img: np.ndarray):
             kwargs = {}
             try:
-                if hasattr(zxingcpp, "BarcodeFormat") and hasattr(zxingcpp.BarcodeFormat, "PDF417"):
-                    kwargs["formats"] = [zxingcpp.BarcodeFormat.PDF417]
+                if hasattr(zxingcpp, "BarcodeFormat"):
+                    formats = []
+                    if hasattr(zxingcpp.BarcodeFormat, "PDF417"):
+                        formats.append(zxingcpp.BarcodeFormat.PDF417)
+                    if hasattr(zxingcpp.BarcodeFormat, "QR_CODE"):
+                        formats.append(zxingcpp.BarcodeFormat.QR_CODE)
+                    if formats:
+                        kwargs["formats"] = formats
             except Exception:
                 pass
             try:
@@ -163,7 +170,8 @@ class BarcodeReader:
                     btype = str(fmt)
                 else:
                     btype = "UNKNOWN"
-                decoded_items.append({"type": btype, "data": text})
+                if btype in allowed_types:
+                    decoded_items.append({"type": btype, "data": text})
             return decoded_items
         def _candidate_images(base: np.ndarray):
             candidates = []
@@ -265,9 +273,8 @@ class BarcodeReader:
                 logger.warning("No barcode detected")
                 return {
                     "success": False,
-                    "message": "No barcode detected. Provide a higher-resolution image (barcode area >= 1000px wide).",
-                    "count": 0,
-                    "barcodes": []
+                    "message": "Barcode not found",
+                    "count": 0
                 }
             # Process decoded barcodes
             barcodes = []

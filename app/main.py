@@ -1,5 +1,6 @@
 """Main FastAPI application for barcode scanning."""
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,10 @@ from io import BytesIO
 from PIL import Image
 from app.config import API_TITLE, API_VERSION, API_DESCRIPTION, ALLOWED_EXTENSIONS, MAX_FILE_SIZE
 from app.utils.barcode_reader import BarcodeReader
+from app.utils.ocr_reader import OcrReader
+
+# Load local environment variables from .env if present
+load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -88,12 +93,45 @@ async def extract_barcode(file: UploadFile = File(...)):
                 detail=validation_message
             )
         
-        # Extract barcodes
-        result = BarcodeReader.extract_barcodes(contents)
-        
+        # Extract barcodes and OCR
+        barcode_result = BarcodeReader.extract_barcodes(contents)
+        textract_id_fields = OcrReader.extract_identity_document_fields(contents)
+        all_barcodes = barcode_result.get("barcodes", [])
+        any_barcode_detected = bool(barcode_result.get("success")) and bool(all_barcodes)
+        pdf417_barcodes = [
+            b for b in all_barcodes
+            if str(b.get("type", "")).upper() == "PDF417"
+        ]
+        pdf417_detected = bool(pdf417_barcodes)
+
+        if not any_barcode_detected:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ocr": {
+                        "detected": bool(textract_id_fields),
+                        "data": textract_id_fields,
+                    }
+                }
+            )
+
         return JSONResponse(
             status_code=200,
-            content=result
+            content={
+                "pdf417": {
+                    "detected": pdf417_detected,
+                    "message": None if pdf417_detected else "PDF417 not detected",
+                    "data": pdf417_barcodes,
+                },
+                "barcode": {
+                    "detected": True,
+                    "data": all_barcodes,
+                },
+                "ocr": {
+                    "detected": bool(textract_id_fields),
+                    "data": textract_id_fields,
+                },
+            }
         )
         
     except HTTPException:
@@ -133,7 +171,18 @@ async def extract_barcode_batch(files: list[UploadFile] = File(...)):
                             "filename": file.filename,
                             "success": False,
                             "message": f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
-                            "barcodes": []
+                            "barcode": {
+                                "success": False,
+                                "message": f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
+                                "count": 0,
+                                "barcodes": []
+                            },
+                            "ocr": {
+                                "success": False,
+                                "message": "OCR not available for invalid files.",
+                                "text": "",
+                                "lines": []
+                            }
                         })
                         continue
                 
@@ -146,7 +195,18 @@ async def extract_barcode_batch(files: list[UploadFile] = File(...)):
                         "filename": file.filename,
                         "success": False,
                         "message": f"File size exceeds maximum limit of {MAX_FILE_SIZE / 1024 / 1024}MB",
-                        "barcodes": []
+                        "barcode": {
+                            "success": False,
+                            "message": f"File size exceeds maximum limit of {MAX_FILE_SIZE / 1024 / 1024}MB",
+                            "count": 0,
+                            "barcodes": []
+                        },
+                        "ocr": {
+                            "success": False,
+                            "message": "OCR not available for oversized files.",
+                            "text": "",
+                            "lines": []
+                        }
                     })
                     continue
                 
@@ -157,21 +217,72 @@ async def extract_barcode_batch(files: list[UploadFile] = File(...)):
                         "filename": file.filename,
                         "success": False,
                         "message": validation_message,
-                        "barcodes": []
+                        "barcode": {
+                            "success": False,
+                            "message": validation_message,
+                            "count": 0,
+                            "barcodes": []
+                        },
+                        "ocr": {
+                            "success": False,
+                            "message": "OCR not available for invalid images.",
+                            "text": "",
+                            "lines": []
+                        }
                     })
                     continue
                 
-                # Extract barcodes
-                result = BarcodeReader.extract_barcodes(contents)
-                result["filename"] = file.filename
-                results.append(result)
+                # Extract barcodes and OCR
+                barcode_result = BarcodeReader.extract_barcodes(contents)
+                textract_id_fields = OcrReader.extract_identity_document_fields(contents)
+                all_barcodes = barcode_result.get("barcodes", [])
+                any_barcode_detected = bool(barcode_result.get("success")) and bool(all_barcodes)
+                pdf417_barcodes = [
+                    b for b in all_barcodes
+                    if str(b.get("type", "")).upper() == "PDF417"
+                ]
+                pdf417_detected = bool(pdf417_barcodes)
+
+                if not any_barcode_detected:
+                    results.append({
+                        "filename": file.filename,
+                        "ocr": {
+                            "detected": bool(textract_id_fields),
+                            "data": textract_id_fields,
+                        },
+                    })
+                else:
+                    results.append({
+                        "filename": file.filename,
+                        "pdf417": {
+                            "detected": pdf417_detected,
+                            "message": None if pdf417_detected else "PDF417 not detected",
+                            "data": pdf417_barcodes,
+                        },
+                        "barcode": {
+                            "detected": True,
+                            "data": all_barcodes,
+                        },
+                        "ocr": {
+                            "detected": bool(textract_id_fields),
+                            "data": textract_id_fields,
+                        },
+                    })
                 
             except Exception as e:
                 results.append({
                     "filename": file.filename,
                     "success": False,
                     "message": f"Error processing file: {str(e)}",
-                    "barcodes": []
+                    "pdf417": {
+                        "detected": False,
+                        "message": f"Error processing file: {str(e)}",
+                        "data": []
+                    },
+                    "ocr": {
+                        "detected": False,
+                        "data": []
+                    }
                 })
         
         return JSONResponse(
