@@ -4,7 +4,7 @@ from PIL import Image
 from io import BytesIO
 import logging
 
-# ZXing-C++ (best PDF417 support on Windows)
+# Primary decoder (best PDF417 support on Windows)
 ZXING_AVAILABLE = False
 try:
     import zxingcpp
@@ -118,9 +118,9 @@ class BarcodeReader:
 
     @staticmethod
     def _try_decode_zxing(image: np.ndarray):
-        """Try to decode barcode with ZXing-C++ (rotation-aware)."""
+        """Try to decode barcode with the primary decoder (rotation-aware)."""
         if not ZXING_AVAILABLE or zxingcpp is None:
-            logger.error("ZXing-C++ not available - cannot decode barcodes")
+            logger.error("Primary barcode decoder not available - cannot decode barcodes")
             return []
         def _read(img: np.ndarray):
             kwargs = {}
@@ -200,20 +200,20 @@ class BarcodeReader:
                 results = _read(cand)
                 decoded = _normalize_results(results)
                 if decoded:
-                    logger.info(f"Barcode decoded with ZXing ({label} variant {idx + 1})")
+                    logger.info(f"Barcode decoded with primary decoder ({label} variant {idx + 1})")
                     return decoded
             return []
         decoded = _try_candidates(image, "original")
         if decoded:
             return decoded
-        logger.debug("Trying ZXing rotations: 90, 180, 270")
+        logger.debug("Trying rotations: 90, 180, 270")
         for angle in [90, 180, 270]:
             rotated = np.rot90(image, k=angle // 90)
             decoded = _try_candidates(rotated, f"rotated {angle}")
             if decoded:
-                logger.info(f"Barcode decoded with ZXing at {angle} rotation")
+                logger.info(f"Barcode decoded with primary decoder at {angle} rotation")
                 return decoded
-        logger.debug("No barcode found with ZXing after rotation attempts")
+        logger.debug("No barcode found after rotation attempts")
         return []
 
     @staticmethod
@@ -245,7 +245,7 @@ class BarcodeReader:
             if not ZXING_AVAILABLE:
                 return {
                     "success": False,
-                    "message": "ZXing-C++ not available. Install with: pip install zxing-cpp",
+                    "message": "Barcode decoder not available. Please contact support.",
                     "count": 0,
                     "barcodes": []
                 }
@@ -260,7 +260,7 @@ class BarcodeReader:
             rgb_image = BarcodeReader._ensure_min_size(rgb_image)
             # Try decode with rotation handling
             decoded_objects = BarcodeReader._try_decode_zxing(rgb_image)
-            decode_method = "zxingcpp"
+            decode_method = "universal_scanner"
             if not decoded_objects:
                 logger.warning("No barcode detected")
                 return {
